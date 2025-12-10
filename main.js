@@ -1,7 +1,7 @@
 import handler_ImageMagick from "./handlers/ImageMagick.js";
 import handler_FFmpeg from "./handlers/FFmpeg.js";
 import handler_canvg from "./handlers/canvg.js";
-import handler_img2svg from "./handlers/img2svg.js";
+import handler_imageToSVG from "./handlers/imageToSVG.js";
 import handler_pdftoimg from "./handlers/pdftoimg.js";
 import handler_rename from "./handlers/rename.js";
 
@@ -9,7 +9,7 @@ const handlers = [
   handler_ImageMagick,
   handler_FFmpeg,
   handler_canvg,
-  handler_img2svg,
+  handler_imageToSVG,
   handler_pdftoimg,
   handler_rename
 ];
