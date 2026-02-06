@@ -182,16 +182,22 @@ class FFmpegHandler implements FormatHandler {
 
     await this.reloadFFmpeg();
 
-    for (const file of inputFiles) {
-      await this.#ffmpeg.writeFile(file.name, new Uint8Array(file.bytes));
+    let forceFPS = 0;
+    if (inputFormat.mime === "image/png" || inputFormat.mime === "image/jpeg") {
+      forceFPS = inputFiles.length < 30 ? 1 : 30;
     }
-    const listString = inputFiles.map(f => `file '${f.name}'`).join("\n");
+
+    let fileIndex = 0;
+    let listString = "";
+    for (const file of inputFiles) {
+      const entryName = `file_${fileIndex++}.${inputFormat.extension}`;
+      await this.#ffmpeg.writeFile(entryName, new Uint8Array(file.bytes));
+      listString += `file '${entryName}'\n`;
+      if (forceFPS) listString += `duration ${1 / forceFPS}\n`;
+    }
     await this.#ffmpeg.writeFile("list.txt", new TextEncoder().encode(listString));
 
     const command = ["-hide_banner", "-f", "concat", "-safe", "0", "-i", "list.txt", "-f", outputFormat.internal];
-    if (inputFormat.format === "png" || inputFormat.mime === "image/jpeg") {
-      command.push("-r", "1");
-    }
     if (outputFormat.mime === "video/mp4") {
       command.push("-pix_fmt", "yuv420p");
     }
@@ -202,8 +208,9 @@ class FFmpegHandler implements FormatHandler {
       await this.#ffmpeg!.exec(command);
     });
 
-    for (const file of inputFiles) {
-      await this.#ffmpeg.deleteFile(file.name);
+    for (let i = 0; i < fileIndex; i ++) {
+      const entryName = `file_${i}.${inputFormat.extension}`;
+      await this.#ffmpeg.deleteFile(entryName);
     }
 
     if (stdout.includes("Conversion failed!\n")) {
@@ -230,6 +237,7 @@ class FFmpegHandler implements FormatHandler {
     }
 
     await this.#ffmpeg.deleteFile("output");
+    await this.#ffmpeg.deleteFile("list.txt");
 
     const baseName = inputFiles[0].name.split(".")[0];
     const name = baseName + "." + outputFormat.extension;
