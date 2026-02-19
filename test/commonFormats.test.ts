@@ -86,7 +86,7 @@ test("png → jpeg", async () => {
     CommonFormats.JPEG
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual(["image/png", "image/jpeg"]);
 
 }, { timeout: 60000 });
@@ -99,7 +99,7 @@ test("png → svg", async () => {
     CommonFormats.SVG
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual(["image/png", "image/svg+xml"]);
 
 }, { timeout: 60000 });
@@ -112,7 +112,7 @@ test("mp4 → apng", async () => {
     CommonFormats.PNG
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.format)).toEqual(["mp4", "apng"]);
   expect(conversion?.files.length).toBe(1);
 
@@ -126,7 +126,7 @@ test("png → mp4", async () => {
     CommonFormats.MP4
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual(["image/png", "video/mp4"]);
 
 }, { timeout: 60000 });
@@ -139,7 +139,7 @@ test("png → wav → mp3", async () => {
     CommonFormats.MP3
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual(["image/png", "audio/wav", "audio/mpeg"]);
 
 }, { timeout: 60000 });
@@ -152,7 +152,7 @@ test("mp3 → png → gif", async () => {
     CommonFormats.GIF
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual(["audio/mpeg", "image/png", "image/gif"]);
 
 }, { timeout: 60000 });
@@ -165,7 +165,7 @@ test("docx → html → svg → png → pdf", async () => {
     CommonFormats.PDF
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual([
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "text/html", "image/svg+xml", "image/png", "application/pdf"
@@ -183,10 +183,26 @@ test("md → docx", async () => {
     CommonFormats.DOCX
   );
 
-  expect(conversion).toBeDefined();
+  expect(conversion).toBeTruthy();
   expect(conversion!.path.map(c => c.format.mime)).toEqual([
     "text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ]);
+
+}, { timeout: 60000 });
+
+test("txt → wav → flac", async () => {
+
+  const conversion = await attemptConversion(
+    ["markdown.md"],
+    CommonFormats.TEXT,
+    CommonFormats.FLAC
+  );
+
+  expect(conversion).toBeTruthy();
+  expect(conversion!.path.map(c => c.format.mime)).toEqual([
+    "text/plain", "audio/wav", "audio/flac"
+  ]);
+  expect(conversion!.path[1].handler.name).toBe("espeakng");
 
 }, { timeout: 60000 });
 
