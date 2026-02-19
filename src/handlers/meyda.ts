@@ -182,11 +182,13 @@ class meydaHandler implements FormatHandler {
 
         const frameBuffer = new Float32Array(bufferSize);
 
-        for (let i = 0; i < imageWidth; i ++) {
-
+        for (let i = 0; i < imageWidth; i++) {
           const start = i * hopSize;
           frameBuffer.fill(0);
-          frameBuffer.set(samples.subarray(start, Math.min(start + bufferSize, samples.length)));
+          if (start < samples.length) {
+            frameBuffer.set(samples.subarray(start, Math.min(start + bufferSize, samples.length)));
+          }
+
           const spectrum = Meyda.extract("complexSpectrum", frameBuffer);
           if (!spectrum || !("real" in spectrum) || !("imag" in spectrum)) {
             throw "Failed to extract audio features!";
@@ -195,7 +197,7 @@ class meydaHandler implements FormatHandler {
           const imaginary = spectrum.imag as Float32Array;
 
           const pixels = new Uint8ClampedArray(imageHeight * 4);
-          for (let j = 0; j < imageHeight; j ++) {
+          for (let j = 0; j < imageHeight; j++) {
             // Calculate amplitude, amplitude is halved when only half of the FFT is used, so double it
             const magnitude = Math.sqrt(real[j] * real[j] + imaginary[j] * imaginary[j]) / bufferSize * 2;
             const phase = Math.atan2(imaginary[j], real[j]);
@@ -211,7 +213,6 @@ class meydaHandler implements FormatHandler {
           }
           const imageData = new ImageData(pixels as ImageDataArray, 1, imageHeight);
           this.#ctx.putImageData(imageData, i, 0);
-
         }
 
         const bytes: Uint8Array = await new Promise((resolve, reject) => {
