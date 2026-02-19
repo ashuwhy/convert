@@ -23,6 +23,7 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    "jsx": "react-jsx",
     /* Temporary fix!!! This is only really a problem in dependencies. */
     /* Not sure how to best handle this in the long term, though. */
     "noUnusedLocals": false, /* SHOULD be true */
@@ -35,8 +36,15 @@
      */
     "baseUrl": ".",
     "paths": {
-      "qoi-fu": ["./src/handlers/qoi-fu/transpiled/QOI.js"],
-      "qoa-fu": ["./src/handlers/qoa-fu/transpiled/QOA.js"]
+      "@/*": [
+        "./src/*"
+      ],
+      "qoi-fu": [
+        "./src/handlers/qoi-fu/transpiled/QOI.js"
+      ],
+      "qoa-fu": [
+        "./src/handlers/qoa-fu/transpiled/QOA.js"
+      ]
     }
   },
   "include": [

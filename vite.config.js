@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import tsconfigPaths from "vite-tsconfig-paths";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   optimizeDeps: {
@@ -9,7 +10,7 @@ export default defineConfig({
       "@sqlite.org/sqlite-wasm",
     ]
   },
-  base: "/convert/",
+
   plugins: [
     viteStaticCopy({
       targets: [
@@ -39,6 +40,7 @@ export default defineConfig({
         }
       ]
     }),
-    tsconfigPaths()
+    tsconfigPaths(),
+    react()
   ]
 });
