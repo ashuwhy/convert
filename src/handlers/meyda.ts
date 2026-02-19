@@ -19,7 +19,7 @@ class meydaHandler implements FormatHandler {
   #canvas?: HTMLCanvasElement;
   #ctx?: CanvasRenderingContext2D;
 
-  async init () {
+  async init() {
 
     const dummy = document.createElement("audio");
     this.supportedFormats.push(
@@ -27,7 +27,7 @@ class meydaHandler implements FormatHandler {
         .allowFrom(dummy.canPlayType("audio/wav") !== "")
         .allowTo()
     );
-    
+
     if (dummy.canPlayType("audio/mpeg")) this.supportedFormats.push(
       // lossless=false, lossy reconstruction 
       CommonFormats.MP3.supported("audio", true, false)
@@ -52,8 +52,8 @@ class meydaHandler implements FormatHandler {
     this.ready = true;
 
   }
-  
-  async doConvert (
+
+  async doConvert(
     inputFiles: FileData[],
     inputFormat: FileFormat,
     outputFormat: FileFormat
@@ -96,6 +96,14 @@ class meydaHandler implements FormatHandler {
         const imageWidth = image.naturalWidth;
         const imageHeight = image.naturalHeight;
 
+        // Detect stereo based on height
+        const isStereo = imageHeight === bufferSize; // 2048
+        if (!isStereo && imageHeight !== bufferSize / 2) {
+          console.warn(`Unexpected image height: ${imageHeight}. Assuming Mono.`);
+        }
+
+        const channelHeight = bufferSize / 2;
+
         this.#canvas.width = imageWidth;
         this.#canvas.height = imageHeight;
         this.#ctx.drawImage(image, 0, 0);
@@ -105,14 +113,21 @@ class meydaHandler implements FormatHandler {
 
         const sampleRate = this.#audioContext.sampleRate;
 
-        const audioData = new Float32Array(imageWidth * hopSize + bufferSize);
+        // Stereo output requires interleaved samples [L, R, L, R...]
+        // or getting separate channels then interleaving them for wavefile?
+        // Wavefile: ".fromScratch(numChannels, sampleRate, bitDepth, samples)"
+        // "samples" can be an array of arrays for multi-channel.
+
+        const leftAudioData = new Float32Array(imageWidth * hopSize + bufferSize);
+        const rightAudioData = isStereo ? new Float32Array(imageWidth * hopSize + bufferSize) : null;
 
         // Precompute sine and cosine waves for each frequency
-        const sineWaves = new Float32Array(imageHeight * bufferSize);
-        const cosineWaves = new Float32Array(imageHeight * bufferSize);
-        for (let y = 0; y < imageHeight; y ++) {
-          const frequency = (y / imageHeight) * (sampleRate / 2);
-          for (let s = 0; s < bufferSize; s ++) {
+        // Only need one set of tables as frequency mapping is same for both channels
+        const sineWaves = new Float32Array(channelHeight * bufferSize);
+        const cosineWaves = new Float32Array(channelHeight * bufferSize);
+        for (let y = 0; y < channelHeight; y++) {
+          const frequency = (y / channelHeight) * (sampleRate / 2);
+          for (let s = 0; s < bufferSize; s++) {
             const timeInSeconds = s / sampleRate;
             const angle = 2 * Math.PI * frequency * timeInSeconds;
             sineWaves[y * bufferSize + s] = Math.sin(angle);
@@ -120,11 +135,13 @@ class meydaHandler implements FormatHandler {
           }
         }
 
-        for (let x = 0; x < imageWidth; x ++) {
-          const frameData = new Float32Array(bufferSize);
+        for (let x = 0; x < imageWidth; x++) {
+          const leftFrameData = new Float32Array(bufferSize);
+          const rightFrameData = isStereo ? new Float32Array(bufferSize) : null;
 
-          for (let y = 0; y < imageHeight; y ++) {
-            const pixelIndex = (x + (imageHeight - y - 1) * imageWidth) * 4;
+          // Process Left Channel (Top Half)
+          for (let y = 0; y < channelHeight; y++) {
+            const pixelIndex = (x + (channelHeight - y - 1) * imageWidth) * 4;
 
             // Extract amplitude from R and G channels
             const magInt = pixelBuffer[pixelIndex] + (pixelBuffer[pixelIndex + 1] << 8);
@@ -132,33 +149,98 @@ class meydaHandler implements FormatHandler {
             // Extract phase from B channel
             const phase = (pixelBuffer[pixelIndex + 2] / 255) * (2 * Math.PI) - Math.PI;
 
-            for (let s = 0; s < bufferSize; s ++) {
-              frameData[s] += amplitude * (
+            for (let s = 0; s < bufferSize; s++) {
+              const waveVal = amplitude * (
                 cosineWaves[y * bufferSize + s] * Math.cos(phase)
                 - sineWaves[y * bufferSize + s] * Math.sin(phase)
               );
+              leftFrameData[s] += waveVal;
+            }
+          }
+
+          // Process Right Channel (Bottom Half) if stereo
+          if (isStereo && rightFrameData) {
+            for (let y = 0; y < channelHeight; y++) {
+              // Offset y by channelHeight for the bottom half of the image
+              // But read from top-down within that block?
+              // Writing logic: `this.#ctx.putImageData(imageData, i, 0)` for Left
+              // `this.#ctx.putImageData(imageData, i, channelHeight)` for Right.
+              // So pixel reading:
+              // Top half: y=0..1023. Drawn with `putImageData(..., i, 0)`.
+              // Bottom half: y=1024..2047. Drawn with `putImageData(..., i, 1024)`.
+
+              // `pixelIndex` calculation in loop above was: `(x + (channelHeight - y - 1) * imageWidth) * 4`
+              // This assumes we are iterating y from 0 (bottom of freq range) to top.
+              // And `putImageData` places (0,0) at top-left.
+              // My writing logic for `putImageData` puts low freq at bottom of the block?
+              // Let's check writing logic below.
+              // Writing: `pixelIndex = (channelHeight - j - 1) * 4`. `j` goes 0..channelHeight.
+              // `j=0` is DC/Low freq. `pixelIndex` is max (bottom of block).
+              // So visually, low freq is at the bottom of the spectrogram block. Correct.
+
+              // So for reading Left (top block):
+              // Block y range: 0 to 1023.
+              // visual-y (0 at top) = channelHeight - freq-y - 1.
+              // global-y = visual-y.
+              // Correct.
+
+              // For reading Right (bottom block):
+              // Block y range: 1024 to 2047.
+              // visual-y (0 at top of *block*) = channelHeight - freq-y - 1.
+              // global-y = visual-y + channelHeight.
+              // pixelIndex = (x + (global-y) * imageWidth) * 4
+
+              const visualY = channelHeight - y - 1;
+              const globalY = visualY + channelHeight;
+              const pixelIndex = (x + globalY * imageWidth) * 4;
+
+              const magInt = pixelBuffer[pixelIndex] + (pixelBuffer[pixelIndex + 1] << 8);
+              const amplitude = magInt / 65535;
+              const phase = (pixelBuffer[pixelIndex + 2] / 255) * (2 * Math.PI) - Math.PI;
+
+              for (let s = 0; s < bufferSize; s++) {
+                const waveVal = amplitude * (
+                  cosineWaves[y * bufferSize + s] * Math.cos(phase)
+                  - sineWaves[y * bufferSize + s] * Math.sin(phase)
+                );
+                rightFrameData[s] += waveVal;
+              }
             }
           }
 
           // overlap-add
           const outputOffset = x * hopSize;
-          for (let s = 0; s < bufferSize; s ++) {
-            audioData[outputOffset + s] += frameData[s];
+          for (let s = 0; s < bufferSize; s++) {
+            leftAudioData[outputOffset + s] += leftFrameData[s];
+            if (rightAudioData && rightFrameData) {
+              rightAudioData[outputOffset + s] += rightFrameData[s];
+            }
           }
         }
 
         // Normalize output
-        let max = 0;
-        for (let i = 0; i < imageWidth * bufferSize; i ++) {
-          const magnitude = Math.abs(audioData[i]);
-          if (magnitude > max) max = magnitude;
-        }
-        for (let i = 0; i < audioData.length; i ++) {
-          audioData[i] /= max;
-        }
+        const normalize = (data: Float32Array) => {
+          let max = 0;
+          for (let i = 0; i < imageWidth * bufferSize; i++) {
+            const magnitude = Math.abs(data[i]);
+            if (magnitude > max) max = magnitude;
+          }
+          if (max > 0) {
+            for (let i = 0; i < data.length; i++) {
+              data[i] /= max;
+            }
+          }
+        };
+
+        normalize(leftAudioData);
+        if (rightAudioData) normalize(rightAudioData);
 
         const wav = new WaveFile();
-        wav.fromScratch(1, sampleRate, "32f", audioData);
+        if (isStereo && rightAudioData) {
+          wav.fromScratch(2, sampleRate, "32f", [leftAudioData, rightAudioData]);
+        } else {
+          wav.fromScratch(1, sampleRate, "32f", leftAudioData);
+        }
 
         const bytes = wav.toBuffer();
         const name = inputFile.name.split(".")[0] + "." + outputFormat.extension;
@@ -173,45 +255,74 @@ class meydaHandler implements FormatHandler {
 
         Meyda.bufferSize = bufferSize;
         Meyda.sampleRate = audioData.sampleRate;
-        const samples = audioData.getChannelData(0);
-        const imageWidth = Math.max(1, Math.ceil((samples.length - bufferSize) / hopSize) + 1);
-        const imageHeight = Meyda.bufferSize / 2;
+
+        const numChannels = audioData.numberOfChannels;
+        const isStereo = numChannels >= 2;
+
+        const leftSamples = audioData.getChannelData(0);
+        const rightSamples = isStereo ? audioData.getChannelData(1) : null;
+
+        // We use the length of the longest channel (usually they are same)
+        const samplesLength = leftSamples.length;
+
+        const imageWidth = Math.max(1, Math.ceil((samplesLength - bufferSize) / hopSize) + 1);
+        const channelHeight = Meyda.bufferSize / 2; // 1024
+        const imageHeight = isStereo ? channelHeight * 2 : channelHeight;
 
         this.#canvas.width = imageWidth;
         this.#canvas.height = imageHeight;
 
-        const frameBuffer = new Float32Array(bufferSize);
+        const leftFrameBuffer = new Float32Array(bufferSize);
+        const rightFrameBuffer = isStereo ? new Float32Array(bufferSize) : null;
 
-        for (let i = 0; i < imageWidth; i ++) {
+        // Function to draw a channel to a specific Y offset
+        const drawChannel = (samples: Float32Array, yOffset: number) => {
+          const frameBuffer = new Float32Array(bufferSize);
 
-          const start = i * hopSize;
-          frameBuffer.fill(0);
-          frameBuffer.set(samples.subarray(start, Math.min(start + bufferSize, samples.length)));
-          const spectrum = Meyda.extract("complexSpectrum", frameBuffer);
-          if (!spectrum || !("real" in spectrum) || !("imag" in spectrum)) {
-            throw "Failed to extract audio features!";
+          for (let i = 0; i < imageWidth; i++) {
+            const start = i * hopSize;
+            frameBuffer.fill(0);
+            if (start < samples.length) {
+              frameBuffer.set(samples.subarray(start, Math.min(start + bufferSize, samples.length)));
+            }
+
+            const spectrum = Meyda.extract("complexSpectrum", frameBuffer);
+            if (!spectrum || !("real" in spectrum) || !("imag" in spectrum)) {
+              // Start of silence or end of file might fail? Or simple implementation error.
+              // Meyda should return zeros if input is silent.
+              // throw "Failed to extract audio features!";
+              continue; // Skip frame if extraction fails
+            }
+            const real = spectrum.real as Float32Array;
+            const imaginary = spectrum.imag as Float32Array;
+
+            const pixels = new Uint8ClampedArray(channelHeight * 4);
+            for (let j = 0; j < channelHeight; j++) {
+              // Calculate amplitude, amplitude is halved when only half of the FFT is used, so double it
+              const magnitude = Math.sqrt(real[j] * real[j] + imaginary[j] * imaginary[j]) / bufferSize * 2;
+              const phase = Math.atan2(imaginary[j], real[j]);
+
+              // Visual Y: 0 at top, corresponding to j=channelHeight-1 (highest freq).
+              // We want low freq (j=0) at bottom.
+              const pixelIndex = (channelHeight - j - 1) * 4;
+
+              // Encode magnitude in R, G channels
+              const magInt = Math.floor(Math.min(magnitude * 65535, 65535));
+              pixels[pixelIndex] = magInt & 0xFF;
+              pixels[pixelIndex + 1] = (magInt >> 8) & 0xFF;
+              // Encode phase in B channel
+              const phaseNormalized = Math.floor(((phase + Math.PI) / (2 * Math.PI)) * 255);
+              pixels[pixelIndex + 2] = phaseNormalized;
+              pixels[pixelIndex + 3] = 0xFF;
+            }
+            const imageData = new ImageData(pixels, 1, channelHeight);
+            this.#ctx!.putImageData(imageData, i, yOffset);
           }
-          const real = spectrum.real as Float32Array;
-          const imaginary = spectrum.imag as Float32Array;
+        };
 
-          const pixels = new Uint8ClampedArray(imageHeight * 4);
-          for (let j = 0; j < imageHeight; j ++) {
-            // Calculate amplitude, amplitude is halved when only half of the FFT is used, so double it
-            const magnitude = Math.sqrt(real[j] * real[j] + imaginary[j] * imaginary[j]) / bufferSize * 2;
-            const phase = Math.atan2(imaginary[j], real[j]);
-            const pixelIndex = (imageHeight - j - 1) * 4;
-            // Encode magnitude in R, G channels
-            const magInt = Math.floor(Math.min(magnitude * 65535, 65535));
-            pixels[pixelIndex] = magInt & 0xFF;
-            pixels[pixelIndex + 1] = (magInt >> 8) & 0xFF;
-            // Encode phase in B channel
-            const phaseNormalized = Math.floor(((phase + Math.PI) / (2 * Math.PI)) * 255);
-            pixels[pixelIndex + 2] = phaseNormalized;
-            pixels[pixelIndex + 3] = 0xFF;
-          }
-          const imageData = new ImageData(pixels as ImageDataArray, 1, imageHeight);
-          this.#ctx.putImageData(imageData, i, 0);
-
+        drawChannel(leftSamples, 0);
+        if (isStereo && rightSamples) {
+          drawChannel(rightSamples, channelHeight);
         }
 
         const bytes: Uint8Array = await new Promise((resolve, reject) => {
@@ -226,8 +337,8 @@ class meydaHandler implements FormatHandler {
       }
     }
 
-
     return outputFiles;
+
   }
 
 }
