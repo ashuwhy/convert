@@ -113,16 +113,10 @@ class meydaHandler implements FormatHandler {
 
         const sampleRate = this.#audioContext.sampleRate;
 
-        // Stereo output requires interleaved samples [L, R, L, R...]
-        // or getting separate channels then interleaving them for wavefile?
-        // Wavefile: ".fromScratch(numChannels, sampleRate, bitDepth, samples)"
-        // "samples" can be an array of arrays for multi-channel.
-
         const leftAudioData = new Float32Array(imageWidth * hopSize + bufferSize);
         const rightAudioData = isStereo ? new Float32Array(imageWidth * hopSize + bufferSize) : null;
 
         // Precompute sine and cosine waves for each frequency
-        // Only need one set of tables as frequency mapping is same for both channels
         const sineWaves = new Float32Array(channelHeight * bufferSize);
         const cosineWaves = new Float32Array(channelHeight * bufferSize);
         for (let y = 0; y < channelHeight; y++) {
@@ -161,34 +155,6 @@ class meydaHandler implements FormatHandler {
           // Process Right Channel (Bottom Half) if stereo
           if (isStereo && rightFrameData) {
             for (let y = 0; y < channelHeight; y++) {
-              // Offset y by channelHeight for the bottom half of the image
-              // But read from top-down within that block?
-              // Writing logic: `this.#ctx.putImageData(imageData, i, 0)` for Left
-              // `this.#ctx.putImageData(imageData, i, channelHeight)` for Right.
-              // So pixel reading:
-              // Top half: y=0..1023. Drawn with `putImageData(..., i, 0)`.
-              // Bottom half: y=1024..2047. Drawn with `putImageData(..., i, 1024)`.
-
-              // `pixelIndex` calculation in loop above was: `(x + (channelHeight - y - 1) * imageWidth) * 4`
-              // This assumes we are iterating y from 0 (bottom of freq range) to top.
-              // And `putImageData` places (0,0) at top-left.
-              // My writing logic for `putImageData` puts low freq at bottom of the block?
-              // Let's check writing logic below.
-              // Writing: `pixelIndex = (channelHeight - j - 1) * 4`. `j` goes 0..channelHeight.
-              // `j=0` is DC/Low freq. `pixelIndex` is max (bottom of block).
-              // So visually, low freq is at the bottom of the spectrogram block. Correct.
-
-              // So for reading Left (top block):
-              // Block y range: 0 to 1023.
-              // visual-y (0 at top) = channelHeight - freq-y - 1.
-              // global-y = visual-y.
-              // Correct.
-
-              // For reading Right (bottom block):
-              // Block y range: 1024 to 2047.
-              // visual-y (0 at top of *block*) = channelHeight - freq-y - 1.
-              // global-y = visual-y + channelHeight.
-              // pixelIndex = (x + (global-y) * imageWidth) * 4
 
               const visualY = channelHeight - y - 1;
               const globalY = visualY + channelHeight;
@@ -288,9 +254,6 @@ class meydaHandler implements FormatHandler {
 
             const spectrum = Meyda.extract("complexSpectrum", frameBuffer);
             if (!spectrum || !("real" in spectrum) || !("imag" in spectrum)) {
-              // Start of silence or end of file might fail? Or simple implementation error.
-              // Meyda should return zeros if input is silent.
-              // throw "Failed to extract audio features!";
               continue; // Skip frame if extraction fails
             }
             const real = spectrum.real as Float32Array;
