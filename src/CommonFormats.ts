@@ -190,7 +190,7 @@ const CommonFormats = {
         "pptx",
         "pptx",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        Category.PRESENTATION
+        [Category.PRESENTATION, Category.DOCUMENT]
     )
 }
 

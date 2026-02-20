@@ -177,6 +177,18 @@ class pandocHandler implements FormatHandler {
       if (format === "revealjs") continue;
       const name = pandocHandler.formatNames.get(format) || format;
       const extension = pandocHandler.formatExtensions.get(format) || format;
+      const mimeType = normalizeMimeType(mime.getType(extension) || `text/${format}`);
+      const categories: string[] = [];
+      if (format === "xlsx") categories.push("spreadsheet");
+      else if (format === "pptx") categories.push("presentation");
+      if (
+        name.toLowerCase().includes("text")
+        || mimeType === "text/plain"
+      ) {
+        categories.push("text");
+      } else {
+        categories.push("document");
+      }
       const isOfficeDocument = format === "docx"
         || format === "xlsx"
         || format === "pptx"
@@ -185,18 +197,20 @@ class pandocHandler implements FormatHandler {
         || format === "odp";
       this.supportedFormats.push({
         name, format, extension,
-        mime: normalizeMimeType(mime.getType(extension) || `text/${format}`),
+        mime: mimeType,
         from: inputFormats.includes(format),
         to: outputFormats.includes(format),
         internal: format,
-        // HACK: misrepresent format intentionally for Office documents.
-        // Pandoc strips rich formatting like color and text alignment,
-        // so this is done to avoid that wherever possible. In a way,
-        // Pandoc's outputs are often more "text" than "document", anyway.
-        category: isOfficeDocument ? "text" : "document",
+        category: categories.length === 1 ? categories[0] : categories,
         lossless: !isOfficeDocument
       });
     }
+
+    // Move HTML up, it's the only format that can embed resources
+    const htmlIndex = this.supportedFormats.findIndex(c => c.internal === "html");
+    const htmlFormat = this.supportedFormats[htmlIndex];
+    this.supportedFormats.splice(htmlIndex, 1);
+    this.supportedFormats.unshift(htmlFormat);
 
     this.ready = true;
   }
