@@ -16,13 +16,13 @@ class FFmpegHandler implements FormatHandler {
   #ffmpeg?: FFmpeg;
 
   #stdout: string = "";
-  handleStdout (log: LogEvent) {
+  handleStdout(log: LogEvent) {
     this.#stdout += log.message + "\n";
   }
-  clearStdout () {
+  clearStdout() {
     this.#stdout = "";
   }
-  async getStdout (callback: () => void | Promise<void>) {
+  async getStdout(callback: () => void | Promise<void>) {
     if (!this.#ffmpeg) return "";
     this.clearStdout();
     this.#ffmpeg.on("log", this.handleStdout.bind(this));
@@ -31,17 +31,17 @@ class FFmpegHandler implements FormatHandler {
     return this.#stdout;
   }
 
-  async loadFFmpeg () {
+  async loadFFmpeg() {
     if (!this.#ffmpeg) return;
     return await this.#ffmpeg.load({
       coreURL: "/convert/wasm/ffmpeg-core.js"
     });
   }
-  terminateFFmpeg () {
+  terminateFFmpeg() {
     if (!this.#ffmpeg) return;
     this.#ffmpeg.terminate();
   }
-  async reloadFFmpeg () {
+  async reloadFFmpeg() {
     if (!this.#ffmpeg) return;
     this.terminateFFmpeg();
     await this.loadFFmpeg();
@@ -56,7 +56,7 @@ class FFmpegHandler implements FormatHandler {
    * @param timeout Max execution time in milliseconds. `-1` for no timeout (default).
    * @param attempts Amount of times to attempt execution. Default is 1.
    */
-  async execSafe (args: string[], timeout: number = -1, attempts: number = 1): Promise<void> {
+  async execSafe(args: string[], timeout: number = -1, attempts: number = 1): Promise<void> {
     if (!this.#ffmpeg) throw "Handler not initialized.";
     try {
       if (timeout === -1) {
@@ -81,7 +81,7 @@ class FFmpegHandler implements FormatHandler {
     }
   }
 
-  async init () {
+  async init() {
 
     this.#ffmpeg = new FFmpeg();
     await this.loadFFmpeg();
@@ -140,6 +140,11 @@ class FFmpegHandler implements FormatHandler {
         mimeType = normalizeMimeType(mimeType);
 
         let category = mimeType.split("/")[0];
+        if (format === "apng" || format === "png") {
+          mimeType = "image/png";
+          category = "image";
+        }
+
         if (
           description.includes("PCM")
           || description.includes("PWM")
@@ -215,7 +220,7 @@ class FFmpegHandler implements FormatHandler {
     this.ready = true;
   }
 
-  async doConvert (
+  async doConvert(
     inputFiles: FileData[],
     inputFormat: FileFormat,
     outputFormat: FileFormat,
@@ -258,7 +263,7 @@ class FFmpegHandler implements FormatHandler {
       await this.#ffmpeg!.exec(command);
     });
 
-    for (let i = 0; i < fileIndex; i ++) {
+    for (let i = 0; i < fileIndex; i++) {
       const entryName = `file_${i}.${inputFormat.extension}`;
       await this.#ffmpeg.deleteFile(entryName);
     }

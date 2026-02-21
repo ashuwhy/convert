@@ -103,12 +103,13 @@ class meydaHandler implements FormatHandler {
         }
 
         const channelHeight = bufferSize / 2;
+        const requiredHeight = isStereo ? bufferSize : channelHeight;
 
         this.#canvas.width = imageWidth;
-        this.#canvas.height = imageHeight;
-        this.#ctx.drawImage(image, 0, 0);
+        this.#canvas.height = requiredHeight;
+        this.#ctx.drawImage(image, 0, 0, imageWidth, requiredHeight);
 
-        const imageData = this.#ctx.getImageData(0, 0, imageWidth, imageHeight);
+        const imageData = this.#ctx.getImageData(0, 0, imageWidth, requiredHeight);
         const pixelBuffer = imageData.data as Uint8ClampedArray;
 
         const sampleRate = this.#audioContext.sampleRate;
@@ -139,16 +140,21 @@ class meydaHandler implements FormatHandler {
 
             // Extract amplitude from R and G channels
             const magInt = pixelBuffer[pixelIndex] + (pixelBuffer[pixelIndex + 1] << 8);
+            if (magInt === 0) continue;
+
             const amplitude = magInt / 65535;
             // Extract phase from B channel
             const phase = (pixelBuffer[pixelIndex + 2] / 255) * (2 * Math.PI) - Math.PI;
 
+            const cosPhase = Math.cos(phase);
+            const sinPhase = Math.sin(phase);
+            const yOffset = y * bufferSize;
+
             for (let s = 0; s < bufferSize; s++) {
-              const waveVal = amplitude * (
-                cosineWaves[y * bufferSize + s] * Math.cos(phase)
-                - sineWaves[y * bufferSize + s] * Math.sin(phase)
+              leftFrameData[s] += amplitude * (
+                cosineWaves[yOffset + s] * cosPhase
+                - sineWaves[yOffset + s] * sinPhase
               );
-              leftFrameData[s] += waveVal;
             }
           }
 
@@ -161,15 +167,20 @@ class meydaHandler implements FormatHandler {
               const pixelIndex = (x + globalY * imageWidth) * 4;
 
               const magInt = pixelBuffer[pixelIndex] + (pixelBuffer[pixelIndex + 1] << 8);
+              if (magInt === 0) continue;
+
               const amplitude = magInt / 65535;
               const phase = (pixelBuffer[pixelIndex + 2] / 255) * (2 * Math.PI) - Math.PI;
 
+              const cosPhase = Math.cos(phase);
+              const sinPhase = Math.sin(phase);
+              const yOffset = y * bufferSize;
+
               for (let s = 0; s < bufferSize; s++) {
-                const waveVal = amplitude * (
-                  cosineWaves[y * bufferSize + s] * Math.cos(phase)
-                  - sineWaves[y * bufferSize + s] * Math.sin(phase)
+                rightFrameData[s] += amplitude * (
+                  cosineWaves[yOffset + s] * cosPhase
+                  - sineWaves[yOffset + s] * sinPhase
                 );
-                rightFrameData[s] += waveVal;
               }
             }
           }
@@ -187,7 +198,7 @@ class meydaHandler implements FormatHandler {
         // Normalize output
         const normalize = (data: Float32Array) => {
           let max = 0;
-          for (let i = 0; i < imageWidth * bufferSize; i++) {
+          for (let i = 0; i < data.length; i++) {
             const magnitude = Math.abs(data[i]);
             if (magnitude > max) max = magnitude;
           }
