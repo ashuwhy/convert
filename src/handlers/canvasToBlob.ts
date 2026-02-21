@@ -59,7 +59,7 @@ class canvasToBlobHandler implements FormatHandler {
         this.#canvas.width = Math.max(minWidth, maxLineWidth);
         this.#canvas.height = Math.max(minHeight, Math.floor(fontSize * lines.length + footerPadding));
 
-        if (outputFormat.mime === "image/jpeg") {
+        if (outputFormat.category === "image" || outputFormat.category?.includes("image")) {
           this.#ctx.fillStyle = "white";
           this.#ctx.fillRect(0, 0, this.#canvas.width, this.#canvas.height);
         }
@@ -67,11 +67,36 @@ class canvasToBlobHandler implements FormatHandler {
         this.#ctx.strokeStyle = "white";
         this.#ctx.font = font;
 
-        for (let i = 0; i < lines.length; i ++) {
+        for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           this.#ctx.fillText(line, 0, fontSize * (i + 1));
           this.#ctx.strokeText(line, 0, fontSize * (i + 1));
         }
+
+        const baseName = inputFile.name.split(".")[0];
+        const name = baseName + "." + outputFormat.extension;
+        const mime = outputFormat.mime;
+        const quality = mime === "image/jpeg" ? 0.92 : undefined;
+
+        let bytes: Uint8Array;
+        try {
+          bytes = await new Promise<Uint8Array>((resolve, reject) => {
+            this.#canvas!.toBlob((blob) => {
+              if (!blob) {
+                const sizeInfo = `${this.#canvas!.width}x${this.#canvas!.height}`;
+                return reject(new Error(`Canvas output failed for ${mime}. Size: ${sizeInfo}.`));
+              }
+              blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
+            }, mime, quality);
+          });
+        } catch (e) {
+          console.error(e);
+          throw e;
+        }
+
+        outputFiles.push({ bytes, name });
+        continue;
+
 
       } else {
 
@@ -79,7 +104,7 @@ class canvasToBlobHandler implements FormatHandler {
         // For SVG, convert to data URL to avoid "Tainted canvases may not be exported" error
         const url =
           inputFormat.mime === "image/svg+xml"
-            ? `data:${inputFormat.mime};base64,${btoa(String.fromCharCode(...inputFile.bytes))}`
+            ? `data:${inputFormat.mime};base64,${btoa(inputFile.bytes.reduce((str, byte) => str + String.fromCharCode(byte), ''))}`
             : URL.createObjectURL(blob);
 
         const image = new Image();

@@ -119,22 +119,34 @@ const fileSelectHandler = (event: Event) => {
   // Common MIME type adjustments (to match "mime" library)
   let mimeType = normalizeMimeType(files[0].type);
 
-  // Find a button matching the input MIME type.
-  const buttonMimeType = Array.from(ui.inputList.children).find(button => {
+  const fileExtension = files[0].name.split(".").pop()?.toLowerCase();
+
+  // Find all buttons matching the input MIME type.
+  const buttonsMatchingMime = Array.from(ui.inputList.children).filter(button => {
     if (!(button instanceof HTMLButtonElement)) return false;
     return button.getAttribute("mime-type") === mimeType;
-  });
+  }) as HTMLButtonElement[];
+  // If there are multiple, find one with a matching extension too
+  let inputFormatButton: HTMLButtonElement;
+  if (buttonsMatchingMime.length > 1) {
+    inputFormatButton = buttonsMatchingMime.find(button => {
+      const formatIndex = button.getAttribute("format-index");
+      if (!formatIndex) return;
+      const format = allOptions[parseInt(formatIndex)];
+      return format.format.extension === fileExtension;
+    }) || buttonsMatchingMime[0];
+  } else {
+    inputFormatButton = buttonsMatchingMime[0];
+  }
   // Click button with matching MIME type.
-  if (mimeType && buttonMimeType instanceof HTMLButtonElement) {
-    buttonMimeType.click();
+  if (mimeType && inputFormatButton instanceof HTMLButtonElement) {
+    inputFormatButton.click();
     ui.inputSearch.value = mimeType;
     filterButtonList(ui.inputList, ui.inputSearch.value);
     return;
   }
 
   // Fall back to matching format by file extension if MIME type wasn't found.
-  const fileExtension = files[0].name.split(".").pop()?.toLowerCase();
-
   const buttonExtension = Array.from(ui.inputList.children).find(button => {
     if (!(button instanceof HTMLButtonElement)) return false;
     const formatIndex = button.getAttribute("format-index");
@@ -312,26 +324,48 @@ ui.modeToggleButton.addEventListener("click", () => {
   buildOptionList();
 });
 
+let deadEndAttempts: ConvertPathNode[][];
+
 async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
 
+  const pathString = path.map(c => c.format.format).join(" → ");
+
+  // Exit early if we've encountered a known dead end
+  for (const deadEnd of deadEndAttempts) {
+    let isDeadEnd = true;
+    for (let i = 0; i < deadEnd.length; i++) {
+      if (path[i] === deadEnd[i]) continue;
+      isDeadEnd = false;
+      break;
+    }
+    if (isDeadEnd) {
+      const deadEndString = deadEnd.slice(-2).map(c => c.format.format).join(" → ");
+      console.warn(`Skipping ${pathString} due to dead end near ${deadEndString}.`);
+      return null;
+    }
+  }
+
   ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
-    <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>`;
+    <p>Trying <b>${pathString}</b>...</p>`;
 
   for (let i = 0; i < path.length - 1; i ++) {
     const handler = path[i + 1].handler;
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
       if (!handler.ready) {
-        try {
-          await handler.init();
-        } catch (_) { return null; }
+        await handler.init();
+        if (!handler.ready) throw `Handler "${handler.name}" not ready after init.`;
         if (handler.supportedFormats) {
           window.supportedFormatCache.set(handler.name, handler.supportedFormats);
           supportedFormats = handler.supportedFormats;
         }
       }
       if (!supportedFormats) throw `Handler "${handler.name}" doesn't support any formats.`;
-      const inputFormat = supportedFormats.find(c => c.mime === path[i].format.mime && c.from)!;
+      const inputFormat = supportedFormats.find(c =>
+        c.from
+        && c.mime === path[i].format.mime
+        && c.format === path[i].format.format
+      )!;
       files = (await Promise.all([
         handler.doConvert(files, inputFormat, path[i + 1].format),
         // Ensure that we wait long enough for the UI to update
@@ -339,12 +373,23 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
       ]))[0];
       if (files.some(c => !c.bytes.length)) throw "Output is empty.";
     } catch (e) {
+
       console.log(path.map(c => c.format.format));
       console.error(handler.name, `${path[i].format.format} → ${path[i + 1].format.format}`, e);
+
+      // Dead ends are added both to the graph and to the attempt system.
+      // The graph may still have old paths queued from before they were
+      // marked as dead ends, so we catch that here.
+      const deadEndPath = path.slice(0, i + 2);
+      deadEndAttempts.push(deadEndPath);
+      window.traversionGraph.addDeadEndPath(path.slice(0, i + 2));
+
       ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
         <p>Looking for a valid path...</p>`;
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
       return null;
+
     }
   }
 
@@ -357,6 +402,8 @@ window.tryConvertByTraversing = async function (
   from: ConvertPathNode,
   to: ConvertPathNode
 ) {
+  deadEndAttempts = [];
+  window.traversionGraph.clearDeadEndPaths();
   for await (const path of window.traversionGraph.searchPath(from, to, simpleMode)) {
     // Use exact output format if the target handler supports it
     if (path.at(-1)?.handler === to.handler) {
@@ -368,8 +415,8 @@ window.tryConvertByTraversing = async function (
   return null;
 }
 
-function downloadFile (bytes: Uint8Array, name: string, mime: string) {
-  const blob = new Blob([bytes as BlobPart], { type: mime });
+function downloadFile (bytes: Uint8Array, name: string) {
+  const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = name;
@@ -402,8 +449,11 @@ ui.convertButton.onclick = async function () {
     for (const inputFile of inputFiles) {
       const inputBuffer = await inputFile.arrayBuffer();
       const inputBytes = new Uint8Array(inputBuffer);
-      if (inputFormat.mime === outputFormat.mime) {
-        downloadFile(inputBytes, inputFile.name, inputFormat.mime);
+      if (
+        inputFormat.mime === outputFormat.mime
+        && inputFormat.format === outputFormat.format
+      ) {
+        downloadFile(inputBytes, inputFile.name);
         continue;
       }
       inputFileData.push({ name: inputFile.name, bytes: inputBytes });
@@ -421,7 +471,7 @@ ui.convertButton.onclick = async function () {
     }
 
     for (const file of output.files) {
-      downloadFile(file.bytes, file.name, outputFormat.mime);
+      downloadFile(file.bytes, file.name);
     }
 
     window.showPopup(
@@ -439,3 +489,11 @@ ui.convertButton.onclick = async function () {
   }
 
 };
+
+// Display the current git commit SHA in the UI, if available
+{
+  const commitElement = document.querySelector("#commit-id");
+  if (commitElement) {
+    commitElement.textContent = import.meta.env.VITE_COMMIT_SHA ?? "unknown";
+  }
+}
