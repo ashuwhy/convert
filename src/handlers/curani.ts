@@ -29,7 +29,7 @@ class curaniHandler implements FormatHandler {
                 name: "Microsoft Windows CUR",
                 format: "cur",
                 extension: "cur",
-                mime: "image/vnd.microsoft.cursor",
+                mime: "image/vnd.microsoft.icon",
                 from: true,
                 to: true,
                 internal: "cur",
