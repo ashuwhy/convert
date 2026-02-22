@@ -15,10 +15,10 @@ let simpleMode: boolean = true;
 
 /** Handlers that support conversion from any formats. */
 const conversionsFromAnyInput: ConvertPathNode[] = handlers
-.filter(h => h.supportAnyInput && h.supportedFormats)
-.flatMap(h => h.supportedFormats!
-  .filter(f => f.to)
-  .map(f => ({ handler: h, format: f})))
+  .filter(h => h.supportAnyInput && h.supportedFormats)
+  .flatMap(h => h.supportedFormats!
+    .filter(f => f.to)
+    .map(f => ({ handler: h, format: f })))
 
 const ui = {
   fileInput: document.querySelector("#file-input") as HTMLInputElement,
@@ -47,7 +47,7 @@ const filterButtonList = (list: HTMLDivElement, string: string) => {
       const format = allOptions[parseInt(formatIndex)];
       hasExtension = format?.format.extension.toLowerCase().includes(string);
     }
-    const hasText = button.textContent.toLowerCase().includes(string);
+    const hasText = (button.textContent || "").toLowerCase().includes(string);
     if (!hasExtension && !hasText) {
       button.style.display = "none";
     } else {
@@ -203,7 +203,7 @@ window.printSupportedFormatCache = () => {
 }
 
 
-async function buildOptionList () {
+async function buildOptionList() {
 
   allOptions.length = 0;
   ui.inputList.innerHTML = "";
@@ -326,7 +326,7 @@ ui.modeToggleButton.addEventListener("click", () => {
 
 let deadEndAttempts: ConvertPathNode[][];
 
-async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
+async function attemptConvertPath(files: FileData[], path: ConvertPathNode[]) {
 
   const pathString = path.map(c => c.format.format).join(" → ");
 
@@ -348,7 +348,7 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
   ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
     <p>Trying <b>${pathString}</b>...</p>`;
 
-  for (let i = 0; i < path.length - 1; i ++) {
+  for (let i = 0; i < path.length - 1; i++) {
     const handler = path[i + 1].handler;
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
@@ -365,7 +365,7 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
         c.from
         && c.mime === path[i].format.mime
         && c.format === path[i].format.format
-      )!;
+      ) ?? (handler.supportAnyInput ? path[i].format : undefined)!;
       files = (await Promise.all([
         handler.doConvert(files, inputFormat, path[i + 1].format),
         // Ensure that we wait long enough for the UI to update
@@ -415,7 +415,7 @@ window.tryConvertByTraversing = async function (
   return null;
 }
 
-function downloadFile (bytes: Uint8Array, name: string) {
+function downloadFile(bytes: Uint8Array, name: string) {
   const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
