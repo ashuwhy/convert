@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/convert/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/convert/wasm/(.*)", "destination": "/wasm/$1" },
+    { "source": "/convert/js/(.*)", "destination": "/js/$1" },
+    { "source": "/convert", "destination": "/index.html" },
+    { "source": "/convert/", "destination": "/index.html" }
+  ]
+}
